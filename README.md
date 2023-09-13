@@ -1,29 +1,18 @@
 # esp32-keyble
 ESP32 port of the keyble library
-working, with some additions!
+working, with some more additions!
 
 Thanks go to <a href="https://github.com/RoP09">RoP09</a>, <a href="https://github.com/tc-maxx">tc-maxx</a>, <a href="https://github.com/henfri">henfri</a>, <a href="https://github.com/MariusSchiffer">MariusSchiffer</a> and of course <a href="https://github.com/oyooyo">oyooyo</a> for their brillant work!
 
+Changes/additions made:
 
-Took RoP09/tc-maxx last update that was posted here: https://www.mikrocontroller.net/topic/458856#6650683 and here https://github.com/tc-maxx/esp32-keyble
-
-Fiddled around a bit to get it to run more stable.
-
-Some changes/additions made:
-
-- RSSI value for BLE connection
-- battery state
-- toggle function for lock
-- AP-Mode and config Portal via AutoConnect
-- MQTT endpoints for state, task and battery 
-- OTA update to upload bin files
-- removed hardcoded credentials
-- serial outputs in english
-- boot button on the ESP32 board toggles the lock
-- changed partion table
+- platformio.ini changed "platform = espressif32" to "platform = espressif32@^2.0.0" to make it work in 2023
+- quick fix for wrong mqtt credentials issue: ESP now prints error codes only once every 10 seconds.
+- added wiegand interface, tag and pin only "hard programmed".
 
 Step by step setup:
 
+- get the original keyble js application (https://github.com/oyooyo/keyble) running and create the credentials (MAC, user_id, user_key).
 - Erase the flash first because of SPIFFS usage and maybe stored old WiFi credentials.
 - Upload the project (I use Platformio).
 - Connect to the ESP32's WiFi network.
@@ -57,6 +46,9 @@ Endpoints are:
 The /task endpoint is usefull, because the ESP toggles between WiFi and BLE connections. If the bridge is connected to WiFi and recieves a command via MQTT, it disables WiFi, connects to the lock via BLE, reconnects after the BLE task has finished and publishes the new state to the mqtt broker.
 
 TODO
+- add tag and pin administrative functions
+- add door sensor option (no locking when door is opened)
+- fix webpage setup: no need for AP if the ESP allready is connected to a wifi
 - register user feature
 - error handling
 - more endpoints like IP, uptime, etc.
