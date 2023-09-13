@@ -13,6 +13,8 @@
 #include <FS.h>
 #include <SPIFFS.h>
 #include "AutoConnect.h"
+#include "Wiegand.h"
+
 
 #define PARAM_FILE      "/keyble.json"
 #define AUX_SETTING_URI "/keyble_setting"
@@ -34,7 +36,7 @@
 #define CARD_KEY "M001AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 
 // ---[Variables]---------------------------------------------------------------
-#pragma region
+//#pragma region
 WebServer Server;
 AutoConnect Portal(Server);
 AutoConnectConfig config;
@@ -75,13 +77,32 @@ String mqtt_pub  = "";
 String mqtt_pub2 = "";
 String mqtt_pub3 = "";
 String mqtt_pub4 = "";
+String mqtt_pub5 = "";
 
 
 WiFiClient wifiClient;
 PubSubClient mqttClient(wifiClient);
-#pragma endregion
+
+WIEGAND wg;
+unsigned long wg_input= 0;
+u8_t wg_tag_array_size = 10;
+u8_t wg_pin_array_size = 10;
+bool wg_tag_accepted = false;
+bool wg_pin_accepted = false;
+bool wg_input_timeout = false;
+String wg_string = String("");
+String wg_tag_array[] = {"012", "123", "234", "345", "456", "567", "678", "789", "890", "901"};
+String wg_pin_array[] = {"0123", "1234", "2345", "3456", "4567", "5678", "6789", "7890", "8901", "9012"};
+unsigned long wg_last_code = 0;
+unsigned long wg_timeout = 1000;
+u8_t wg_accsess_number = 0;
+
+unsigned long error_last_print = 0;
+unsigned long error_intervall = 10000;
+
+//#pragma endregion
 // ---[Add Menue Items]---------------------------------------------------------
-#pragma region
+//#pragma region
 static const char AUX_keyble_setting[] PROGMEM = R"raw(
 [
   {
@@ -180,7 +201,7 @@ static const char AUX_keyble_setting[] PROGMEM = R"raw(
 ]
 )raw";
 
-#pragma endregion
+//#pragma endregion
 // ---[getParams]---------------------------------------------------------------
 void getParams(AutoConnectAux& aux) {
 
@@ -382,8 +403,11 @@ void SetupMqtt() {
       mqttClient.subscribe((String(MqttTopic + MQTT_SUB).c_str()));
   	}
   	else {
+      if (millis() + error_intervall > error_last_print){
+      error_last_print = millis();
       Serial.print("!!! error, rc=");
       Serial.println(mqttClient.state());
+      }
     }
   }
 }
@@ -496,6 +520,8 @@ void setup() {
   delay(1000);
   Serial.begin(115200);
   Serial.println("---Starting up...---");
+  wg.begin(13, 14); //start Wiegand interface, D0 at pin13, D1 at pin 14
+  Serial.println("---Wiegand interface running---");
   Serial.setDebugOutput(true);
   FlashFS.begin(true);
   Serial.println("---AP Settings---");
@@ -527,7 +553,7 @@ void setup() {
    {
      Serial.println("load error");
    }
-   SetupWifi();
+  SetupWifi();
    //Portal.config(config);
 
   
@@ -749,4 +775,51 @@ if (do_open || do_lock || do_unlock || do_status || do_toggle || do_pair)
       }
     }
   }
+
+
+
+  if(wg.available()) // tag was read or button was pressed
+	{
+    wg_input = wg.getCode();
+    wg_last_code = millis();
+		Serial.print("Wiegand Input: ");
+		Serial.println(wg_input);
+
+    if(wg_input > 255){ //bigger numbers are no ascii-characters -> tag-ID
+      wg_string = String(wg_input);
+      Serial.print("tag detected. ID: ");
+      Serial.println(wg_string);
+      for (wg_accsess_number = 0; wg_accsess_number < wg_tag_array_size; wg_accsess_number++){
+        if (wg_string == wg_tag_array[wg_accsess_number]){
+          wg_tag_accepted = true;
+          Serial.print("Acsess garanted. tag number: ");
+          Serial.println(wg_accsess_number);
+        }
+        if (wg_tag_accepted == false){
+          //do something when an unautorized tag was presented
+        }
+      } 
+    } else if (wg_input == '#') { // button # was pressed -> End of code input. Check if entered code is valid.$
+      Serial.print("PIN entered. PIN: ");
+      Serial.println(wg_string);
+      for (wg_accsess_number = 0; wg_accsess_number < wg_pin_array_size; wg_accsess_number++){
+        if (wg_string == wg_pin_array[wg_accsess_number]){
+          wg_pin_accepted = true;
+          Serial.print("Acsess garanted. PIN number: ");
+          Serial.println(wg_accsess_number);
+        }
+        if (wg_pin_accepted == false){
+          //do something when an unautorized pin was entered
+        }
+      }
+    } else { // Button was pressed. add it to the button string
+      wg_string.concat(wg_input);
+    }
+   }
+
+   if (millis() > wg_last_code + wg_timeout) {
+      wg_string = "";
+      wg_input_timeout = true;
+   }
+	
 }
