@@ -84,6 +84,7 @@ modules.xml
 *.ipr
 
 ### PlatformIO ###
+.pio/*
 .pioenvs
 .piolibdeps
 .clang_complete
@@ -106,3 +107,5 @@ cmake-build-debug
 # End of https://www.gitignore.io/api/clion+all,platformio,visualstudiocode
 #
 secrets.h
+.pio/build/esp32dev/.sconsign311.dblite
+.pio/build/esp32dev/firmware.bin

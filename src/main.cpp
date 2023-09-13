@@ -32,6 +32,8 @@
 #define MQTT_PUB2 "/task"
 #define MQTT_PUB3 "/battery"
 #define MQTT_PUB4 "/rssi"
+#define MQTT_PUB5 "/pin"
+#define MQTT_PUB6 "/tag"
 
 #define CARD_KEY "M001AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 
@@ -85,14 +87,17 @@ PubSubClient mqttClient(wifiClient);
 
 WIEGAND wg;
 unsigned long wg_input= 0;
-u8_t wg_tag_array_size = 10;
-u8_t wg_pin_array_size = 10;
+u8_t wg_tag_array_size = 50;
+u8_t wg_pin_array_size = 50;
 bool wg_tag_accepted = false;
 bool wg_pin_accepted = false;
 bool wg_input_timeout = false;
+u8_t wg_mode = false;
+u8_t wg_prog_user = 0;
+
 String wg_string = String("");
-String wg_tag_array[] = {"012", "123", "234", "345", "456", "567", "678", "789", "890", "901"};
-String wg_pin_array[] = {"0123", "1234", "2345", "3456", "4567", "5678", "6789", "7890", "8901", "9012"};
+String wg_tag_array[50] = {"0123456", "1234567","2345678"};
+String wg_pin_array[50] = {"0123", "1234", "2345", "3456", "4567", "5678", "6789", "7890", "8901", "9012"};
 unsigned long wg_last_code = 0;
 unsigned long wg_timeout = 1000;
 u8_t wg_accsess_number = 0;
@@ -781,37 +786,47 @@ if (do_open || do_lock || do_unlock || do_status || do_toggle || do_pair)
   if(wg.available()) // tag was read or button was pressed
 	{
     wg_input = wg.getCode();
+    wg_accsess_number = 0;
+    wg_prog_user = 0;
     wg_last_code = millis();
-		Serial.print("Wiegand Input: ");
-		Serial.println(wg_input);
+		Serial.print("Wiegand Input dez:");
+		Serial.print(wg_input);
+    Serial.print(", hex: ");
+		Serial.println(wg_input, HEX);
 
-    if(wg_input > 255){ //bigger numbers are no ascii-characters -> tag-ID
+    if(wg_input > 255 && wg_mode == 0){ //bigger numbers are no ascii-characters -> tag-ID
       wg_string = String(wg_input);
       Serial.print("tag detected. ID: ");
       Serial.println(wg_string);
       for (wg_accsess_number = 0; wg_accsess_number < wg_tag_array_size; wg_accsess_number++){
         if (wg_string == wg_tag_array[wg_accsess_number]){
           wg_tag_accepted = true;
-          Serial.print("Acsess garanted. tag number: ");
+          Serial.print("Acsess granted. Tag number: ");
           Serial.println(wg_accsess_number);
+          wg_string = "";
         }
-        if (wg_tag_accepted == false){
-          //do something when an unautorized tag was presented
-        }
-      } 
-    } else if (wg_input == '#') { // button # was pressed -> End of code input. Check if entered code is valid.$
+      }
+      if (wg_tag_accepted == false){
+        //do something when an unautorized tag was presented
+        wg_string = "";
+        Serial.println("Acsess denied. Wrong tag ID.");
+      }
+    } else if (wg_input == 13) { // button # was pressed -> End of code input. Check if entered code is valid.$
       Serial.print("PIN entered. PIN: ");
       Serial.println(wg_string);
-      for (wg_accsess_number = 0; wg_accsess_number < wg_pin_array_size; wg_accsess_number++){
-        if (wg_string == wg_pin_array[wg_accsess_number]){
-          wg_pin_accepted = true;
-          Serial.print("Acsess garanted. PIN number: ");
-          Serial.println(wg_accsess_number);
+        for (wg_accsess_number = 0; wg_accsess_number < wg_pin_array_size; wg_accsess_number++){ //check the array if one entry match the input
+          if (wg_string == wg_pin_array[wg_accsess_number]){
+            wg_pin_accepted = true;
+            Serial.print("Acsess granted. PIN: ");
+            Serial.println(wg_accsess_number, DEC);
+            wg_string = "";
+          }
         }
         if (wg_pin_accepted == false){
           //do something when an unautorized pin was entered
+          wg_string = "";
+          Serial.println("Acsess denied. Wrong pin.");
         }
-      }
     } else { // Button was pressed. add it to the button string
       wg_string.concat(wg_input);
     }
@@ -821,5 +836,46 @@ if (do_open || do_lock || do_unlock || do_status || do_toggle || do_pair)
       wg_string = "";
       wg_input_timeout = true;
    }
-	
+   
+
+   if(wg_pin_accepted && WiFi.status() == WL_CONNECTED){
+    if (status == 1){ //moving
+      ;
+    }
+    else if((status == 2)||(status == 4)){ //unlocked or open
+      do_lock = true;
+      wg_pin_accepted = false;
+      Serial.println("Lock the door lock");
+    }
+    else if((status == 3)||(status == 9)){ //locked or timeout
+      do_unlock = true;
+      wg_pin_accepted = false;
+      Serial.println("Unlock the door lock");
+    }
+    else {// status unknown
+      do_unlock = true;
+      wg_pin_accepted = false;
+      Serial.println("Unlock the door lock");
+    }
+   }
+   if(wg_tag_accepted && WiFi.status() == WL_CONNECTED){
+    if (status == 1) {//moving
+      ;
+    }
+    else if((status == 2)||(status == 4)){ //unlocked or open
+      do_lock = true;
+      wg_tag_accepted = false;
+      Serial.println("Lock the door lock");
+    }
+    else if((status == 3)||(status == 9)){ //locked or timeout
+      do_unlock = true;
+      wg_tag_accepted = false;
+      Serial.println("Unlock the door lock");
+    }
+    else {// status unknown
+      do_unlock = true;
+      wg_tag_accepted = false;
+      Serial.println("Unlock the door lock");
+    }
+   }
 }
