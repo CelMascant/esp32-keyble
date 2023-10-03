@@ -5,7 +5,7 @@
 #include "Wiegand.h"
 #include <SPIFFS.h>
 
-#define KEYACC_ArraySize 20
+#define KEYACC_ArraySize 40
 #define KEYACC_EntryLength 10
 
 
