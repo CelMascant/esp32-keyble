@@ -1,0 +1,22 @@
+#######################################
+# Syntax Coloring Map For Keypad Access Control Library
+#######################################
+
+#######################################
+# Datatypes (KEYWORD1)
+#######################################
+
+KEYPAD_ACCESS	KEYWORD1
+
+#######################################
+# Methods and Functions (KEYWORD2)
+#######################################
+
+getCode	KEYWORD2
+getWiegandType	KEYWORD2
+available	KEYWORD2
+access_control KEYWORD2
+
+#######################################
+# Constants (LITERAL1)
+#######################################

@@ -13,8 +13,7 @@
 #include <FS.h>
 #include <SPIFFS.h>
 #include "AutoConnect.h"
-#include "Wiegand.h"
-
+#include "Keypad_access_control.h"
 
 #define PARAM_FILE      "/keyble.json"
 #define AUX_SETTING_URI "/keyble_setting"
@@ -32,10 +31,20 @@
 #define MQTT_PUB2 "/task"
 #define MQTT_PUB3 "/battery"
 #define MQTT_PUB4 "/rssi"
-#define MQTT_PUB5 "/pin"
-#define MQTT_PUB6 "/tag"
+#define MQTT_PUB5 "/pinID"
+#define MQTT_PUB6 "/tagID"
 
 #define CARD_KEY "M001AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+
+// ---[I/O-Settings]---------------------------------------------------------------
+#define D0 34           // D0 line of wiegand interface
+#define D1 35           // D1 line of wiegand interface
+#define RED_LED 13      // Red led in keypad
+#define GREEN_LED 12    // Green led in keypad
+#define BUZZER 14       // Busser in keypad
+#define STAR_BUTTON 26  // Star button input
+#define STAR_OUTPUT 27  // Star output
+#define blink_LED 2     // onboard LED
 
 // ---[Variables]---------------------------------------------------------------
 //#pragma region
@@ -43,6 +52,7 @@ WebServer Server;
 AutoConnect Portal(Server);
 AutoConnectConfig config;
 fs::SPIFFSFS& FlashFS = SPIFFS;
+KEYPAD_ACCESS keypad;
 
 eQ3* keyble;
 
@@ -81,29 +91,18 @@ String mqtt_pub3 = "";
 String mqtt_pub4 = "";
 String mqtt_pub5 = "";
 
-
 WiFiClient wifiClient;
 PubSubClient mqttClient(wifiClient);
 
-WIEGAND wg;
-unsigned long wg_input= 0;
-u8_t wg_tag_array_size = 50;
-u8_t wg_pin_array_size = 50;
-bool wg_tag_accepted = false;
-bool wg_pin_accepted = false;
-bool wg_input_timeout = false;
-u8_t wg_mode = false;
-u8_t wg_prog_user = 0;
+unsigned long last_blink = 0;
+unsigned long blink_intervall = 500;
 
-String wg_string = String("");
-String wg_tag_array[50] = {"0123456", "1234567","2345678"};
-String wg_pin_array[50] = {"0123", "1234", "2345", "3456", "4567", "5678", "6789", "7890", "8901", "9012"};
-unsigned long wg_last_code = 0;
-unsigned long wg_timeout = 1000;
-u8_t wg_accsess_number = 0;
+bool    wg_access_granted = false;
+String wgac_Mode = "0";
+String wgac_ID = "0";
 
 unsigned long error_last_print = 0;
-unsigned long error_intervall = 10000;
+unsigned long error_intervall = 5000;
 
 //#pragma endregion
 // ---[Add Menue Items]---------------------------------------------------------
@@ -520,15 +519,28 @@ void SetupWifi()
   Serial.println("# WiFi connected to IP: " + WiFi.localIP().toString());
   }
 }
+void blink(){
+  if(millis() >= last_blink + blink_intervall){
+    last_blink = millis();
+    if(digitalRead(blink_LED)) {
+      digitalWrite(blink_LED, LOW);
+    } else {
+      digitalWrite(blink_LED, HIGH);      
+    }
+  }
+}
 // ---[Setup]-------------------------------------------------------------------
 void setup() {
-  delay(1000);
+  delay(2000);
   Serial.begin(115200);
   Serial.println("---Starting up...---");
-  wg.begin(13, 14); //start Wiegand interface, D0 at pin13, D1 at pin 14
-  Serial.println("---Wiegand interface running---");
+  pinMode(blink_LED, OUTPUT);
   Serial.setDebugOutput(true);
+  SPIFFS.begin();
+  delay(1500);
   FlashFS.begin(true);
+  keypad.begin(D0, D1, RED_LED, GREEN_LED, BUZZER, STAR_BUTTON, STAR_OUTPUT); //start Wiegand interface, D0 at pin13, D1 at pin 14
+  Serial.println("Wiegand interface running");
   Serial.println("---AP Settings---");
   config.apip = IPAddress(AP_IP);
   Serial.print("---AP IP: ");
@@ -544,6 +556,7 @@ void setup() {
   config.ota = AC_OTA_BUILTIN;
   Server.on("/", rootPage);
   Portal.config(config);
+  pinMode(blink_LED, OUTPUT);
   
   if (Portal.load(FPSTR(AUX_keyble_setting))) {
      AutoConnectAux& keyble_setting = *Portal.aux(AUX_SETTING_URI);
@@ -554,17 +567,14 @@ void setup() {
      Portal.on(AUX_SETTING_URI, loadParams);
      Portal.on(AUX_SAVE_URI, saveParams);
    }
-   else
-   {
+   else{
      Serial.println("load error");
    }
   SetupWifi();
    //Portal.config(config);
 
-  
   //MQTT
-  if(KeyBLEConfigured)
-  {
+  if(KeyBLEConfigured){
     SetupMqtt();
     //Bluetooth
     BLEDevice::init("");
@@ -572,68 +582,46 @@ void setup() {
     //get lockstatus on boot
     do_status = true;
   }
-  else
-  {
+  else{
     Serial.println("# Please fill in MQTT and KeyBLE credentials first!");
 
   }
+  Serial.println("---Setup completed---");
+  Serial.println("");
+  Serial.println("");
 }
 // ---[loop]--------------------------------------------------------------------
 void loop() {
-
+blink();
 Portal.handleClient();  
 
-// This statement will declare pin 0 as digital input 
-pinMode(PushButton, INPUT);
-// digitalRead function stores the Push button state 
-// in variable push_button_state
-int Push_button_state = digitalRead(PushButton);
-// if condition checks if push button is pressed
-// if pressed Lock will toggle state
-
-if (Push_button_state == LOW && WiFi.status() == WL_CONNECTED)
-{ 
-  do_toggle = true;
-   
-}
 // Wifi reconnect
 if (wifiActive)
 {
-  if (WiFi.status() != WL_CONNECTED)
-  {
+  if (WiFi.status() != WL_CONNECTED){
    Serial.println("# WiFi disconnected, reconnect...");
   SetupWifi();
-  }
-  else
-  {
+  }else{
    // MQTT connected?
-   if(!mqttClient.connected())
-   {
-     if (WiFi.status() == WL_CONNECTED) 
-     {
-      if(KeyBLEConfigured)
-      {
+   if(!mqttClient.connected()){
+     if (WiFi.status() == WL_CONNECTED){
+      if(KeyBLEConfigured){
         Serial.println("# MQTT disconnected, reconnect...");
         SetupMqtt();
-        if (statusUpdated)
-        {
+        if (statusUpdated){
           MqttPublish();
         }
-      }
-      else
-      {
+      }else{
         Serial.println("# Please fill in MQTT and KeyBLE credentials first!");
       }
     }
-   }
-    else if(mqttClient.connected())
-    {
+   }else if(mqttClient.connected()){
       mqttClient.loop();
     }
   }
 }
-if (do_open || do_lock || do_unlock || do_status || do_toggle || do_pair) 
-{
+
+if (do_open || do_lock || do_unlock || do_status || do_toggle || do_pair){
   String str_task="working";
   char charBuffer4[8];
   str_task.toCharArray(charBuffer4, 8);
@@ -650,57 +638,48 @@ if (do_open || do_lock || do_unlock || do_status || do_toggle || do_pair)
   keyble->_LockStatus = -1;
   starttime = millis();
 
-  if (do_open)
-  {
+  if (do_open){
     Serial.println("*** open ***");
     keyble->open();
     do_open = false;
   }
 
-  if (do_lock)
-  {
+  if (do_lock){
     Serial.println("*** lock ***");
     keyble->lock();
     do_lock = false;
   }
 
-  if (do_unlock)
-  {
+  if (do_unlock){
     Serial.println("*** unlock ***");
     keyble->unlock();
     do_unlock = false;
   }
   
-  if (do_status)
-  {
+  if (do_status){
     Serial.println("*** get state ***");
     keyble->updateInfo();
     do_status = false;
   }
   
-  if (do_toggle)
-  {
+  if (do_toggle){
     Serial.println("*** toggle ***");
-    if ((status == 2) || (status == 4))
-    {
+    if ((status == 2) || (status == 4)){
       keyble->lock();
       do_lock = false;
     }
-    if (status == 3)
-    {
+    if (status == 3){
       keyble->unlock();
       do_unlock = false;
     }
     do_toggle = false;
    }
    
-   if (do_pair)
-   {
+   if (do_pair){
      Serial.println("*** pair ***");
      //Parse key card data
      std::string cardKey = CARD_KEY;
-     if(cardKey.length() == 56)
-     {
+     if(cardKey.length() == 56){
       Serial.println(cardKey.c_str());
       std::string pairMac = cardKey.substr(1,12);
       
@@ -715,9 +694,7 @@ if (do_open || do_lock || do_unlock || do_status || do_toggle || do_pair)
       Serial.println(pairKey.c_str());
       std::string pairSerial = cardKey.substr(46,10);
       Serial.println(pairSerial.c_str());
-     }
-     else
-     {
+     }else{
       Serial.println("# invalid CardKey! Pattern example:");
       Serial.println("  M followed by KeyBLE MAC length 12");
       Serial.println("  K followed by KeyBLE CardKey length 32");
@@ -728,43 +705,33 @@ if (do_open || do_lock || do_unlock || do_status || do_toggle || do_pair)
    }
   }
   
-  if(waitForAnswer)
-  {
+  if(waitForAnswer){
     bool timeout=(millis() - starttime > LOCK_TIMEOUT *2000 +1000);
     bool finished=false;
 
-    if ((keyble->_LockStatus != -1) || timeout)
-    {
-      if(keyble->_LockStatus == 1)
-      {
+    if ((keyble->_LockStatus != -1) || timeout){
+      if(keyble->_LockStatus == 1){
         //Serial.println("Lockstatus 1");
-        if(timeout)
-        {
+        if(timeout){
           finished=true;
           Serial.println("!!! Lockstatus 1 - timeout !!!");
         }
       }
-      else if(keyble->_LockStatus == -1)
-      {
+      else if(keyble->_LockStatus == -1){
         //Serial.println("Lockstatus -1");
-        if(timeout)
-        {
+        if(timeout){
           keyble->_LockStatus = 9; //timeout
           finished=true;
           Serial.println("!!! Lockstatus -1 - timeout !!!");
         }
-      }
-      else if(keyble->_LockStatus != 1)
-      {
+      }else if(keyble->_LockStatus != 1){
         finished=true;
         //Serial.println("Lockstatus != 1");
       }
 
-      if(finished)
-      {
+      if(finished){
         Serial.println("# Done!");
-        do
-        {
+        do{
           keyble->bleClient->disconnect();
           delay(100);
         }
@@ -780,102 +747,27 @@ if (do_open || do_lock || do_unlock || do_status || do_toggle || do_pair)
       }
     }
   }
+  
+  wg_access_granted =keypad.access_control();
 
-
-
-  if(wg.available()) // tag was read or button was pressed
-	{
-    wg_input = wg.getCode();
-    wg_accsess_number = 0;
-    wg_prog_user = 0;
-    wg_last_code = millis();
-		Serial.print("Wiegand Input dez:");
-		Serial.print(wg_input);
-    Serial.print(", hex: ");
-		Serial.println(wg_input, HEX);
-
-    if(wg_input > 255 && wg_mode == 0){ //bigger numbers are no ascii-characters -> tag-ID
-      wg_string = String(wg_input);
-      Serial.print("tag detected. ID: ");
-      Serial.println(wg_string);
-      for (wg_accsess_number = 0; wg_accsess_number < wg_tag_array_size; wg_accsess_number++){
-        if (wg_string == wg_tag_array[wg_accsess_number]){
-          wg_tag_accepted = true;
-          Serial.print("Acsess granted. Tag number: ");
-          Serial.println(wg_accsess_number);
-          wg_string = "";
-        }
-      }
-      if (wg_tag_accepted == false){
-        //do something when an unautorized tag was presented
-        wg_string = "";
-        Serial.println("Acsess denied. Wrong tag ID.");
-      }
-    } else if (wg_input == 13) { // button # was pressed -> End of code input. Check if entered code is valid.$
-      Serial.print("PIN entered. PIN: ");
-      Serial.println(wg_string);
-        for (wg_accsess_number = 0; wg_accsess_number < wg_pin_array_size; wg_accsess_number++){ //check the array if one entry match the input
-          if (wg_string == wg_pin_array[wg_accsess_number]){
-            wg_pin_accepted = true;
-            Serial.print("Acsess granted. PIN: ");
-            Serial.println(wg_accsess_number, DEC);
-            wg_string = "";
-          }
-        }
-        if (wg_pin_accepted == false){
-          //do something when an unautorized pin was entered
-          wg_string = "";
-          Serial.println("Acsess denied. Wrong pin.");
-        }
-    } else { // Button was pressed. add it to the button string
-      wg_string.concat(wg_input);
-    }
-   }
-
-   if (millis() > wg_last_code + wg_timeout) {
-      wg_string = "";
-      wg_input_timeout = true;
-   }
-   
-
-   if(wg_pin_accepted && WiFi.status() == WL_CONNECTED){
+   if(wg_access_granted == true && WiFi.status() == WL_CONNECTED){
     if (status == 1){ //moving
       ;
     }
     else if((status == 2)||(status == 4)){ //unlocked or open
       do_lock = true;
-      wg_pin_accepted = false;
-      Serial.println("Lock the door lock");
+      wg_access_granted = false;
+      Serial.println("Door unlocked -> Lock.");
     }
     else if((status == 3)||(status == 9)){ //locked or timeout
-      do_unlock = true;
-      wg_pin_accepted = false;
-      Serial.println("Unlock the door lock");
+      do_open = true;
+      wg_access_granted = false;
+      Serial.println("Door locked -> Open.");
     }
     else {// status unknown
       do_unlock = true;
-      wg_pin_accepted = false;
-      Serial.println("Unlock the door lock");
-    }
-   }
-   if(wg_tag_accepted && WiFi.status() == WL_CONNECTED){
-    if (status == 1) {//moving
-      ;
-    }
-    else if((status == 2)||(status == 4)){ //unlocked or open
-      do_lock = true;
-      wg_tag_accepted = false;
-      Serial.println("Lock the door lock");
-    }
-    else if((status == 3)||(status == 9)){ //locked or timeout
-      do_unlock = true;
-      wg_tag_accepted = false;
-      Serial.println("Unlock the door lock");
-    }
-    else {// status unknown
-      do_unlock = true;
-      wg_tag_accepted = false;
-      Serial.println("Unlock the door lock");
+      wg_access_granted = false;
+      Serial.println("Unknown statur -> Unlock.");
     }
    }
 }
