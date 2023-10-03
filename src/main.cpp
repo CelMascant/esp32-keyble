@@ -31,8 +31,7 @@
 #define MQTT_PUB2 "/task"
 #define MQTT_PUB3 "/battery"
 #define MQTT_PUB4 "/rssi"
-#define MQTT_PUB5 "/pinID"
-#define MQTT_PUB6 "/tagID"
+#define MQTT_PUB5 "/access"
 
 #define CARD_KEY "M001AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 
@@ -98,8 +97,9 @@ unsigned long last_blink = 0;
 unsigned long blink_intervall = 500;
 
 bool    wg_access_granted = false;
-String wgac_Mode = "0";
-String wgac_ID = "0";
+String keypad_access_Mode = "0";
+String keypad_last_access_ID = "0";
+String keypad_last_rejected = "0";
 
 unsigned long error_last_print = 0;
 unsigned long error_intervall = 5000;
@@ -381,7 +381,7 @@ void MqttPublish()
     mqtt_pub3 = true;
   }
 
-  //MQTT_PUB3 rssi
+  //MQTT_PUB4 rssi
   rssi = keyble->_RSSI;
   char charBuffer3[4];
   String strRSSI =  String(rssi);
@@ -393,8 +393,22 @@ void MqttPublish()
   Serial.print((String(MqttTopic + MQTT_PUB4).c_str()));
   Serial.print("/");
   Serial.println(charBuffer3);
+
+  //MQTT_PUB5 KeypadAccessControll
+  char charBuffer5[100];
+  String strKPAC =  keypad.state + ";" + String(keypad.mode) + ";" + keypad.last_ID + ";" + keypad.last_Rejected;
+  strKPAC.toCharArray(charBuffer5, 100);
+  mqttClient.publish((String(MqttTopic + MQTT_PUB5).c_str()), charBuffer5);
+  mqtt_pub5 = charBuffer5;
+  Serial.print("# published ");
+  Serial.print((String(MqttTopic + MQTT_PUB5).c_str()));
+  Serial.print("/");
+  Serial.println(charBuffer5);
          
   Serial.println("# waiting for command...");
+
+  
+
 }
 // ---[MQTT-Setup]--------------------------------------------------------------
 void SetupMqtt() {
@@ -748,7 +762,10 @@ if (do_open || do_lock || do_unlock || do_status || do_toggle || do_pair){
     }
   }
   
-  wg_access_granted =keypad.access_control();
+  wg_access_granted =keypad.access_control(); // Keypad access control
+  keypad_access_Mode = String(keypad.mode);
+  keypad_last_access_ID = keypad.last_ID;
+  keypad_last_rejected = keypad.last_Rejected;
 
    if(wg_access_granted == true && WiFi.status() == WL_CONNECTED){
     if (status == 1){ //moving

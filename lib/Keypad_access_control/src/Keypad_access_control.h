@@ -16,8 +16,10 @@ public:
 	void begin(uint8_t D0, uint8_t D1, uint8_t RD, uint8_t GN, uint8_t BUZZ, uint8_t STAR_IN, uint8_t STAR_OUT);
 	void begin(uint8_t D0, uint8_t D1);
 	bool access_control();
-	int lastAccessID();
-	int getMode();
+	static String state;
+	static String last_ID;
+	static String last_Rejected;
+	static int mode;
 	
 private:
 	String readFile(fs::FS &fs, const char * path);
@@ -30,7 +32,6 @@ private:
 	static String input_String;
 	static bool tag_accepted;
 	static bool pin_accepted;
-	static uint8_t mode;
 	static uint8_t pin_number;
 	static unsigned long last_code;
 	static unsigned long input_timeout;
