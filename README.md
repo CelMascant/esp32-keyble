@@ -70,7 +70,7 @@ normal operation:
 
 programming a new tag:
 1. 11223344# -> stored pin 0 matches -> Master pin -> switch to programming mode
-2. 1# -> switch to pin programming
+2. 1# -> switch to tag programming
 3. 15# -> tag number 15 should be changed
 4. tag was readed -> tag number 15 is changed to the readed tag ID
   The programm automaticly stores the new values in SPIFFS.
